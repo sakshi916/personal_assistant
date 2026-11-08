@@ -1,6 +1,6 @@
 
 
-from notes import notes
+from assistant import notes
 from speech import listen_and_recognize
 
 

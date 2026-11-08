@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "applications": [
+    {
+      "id": "apple_notes",
+      "name": "Apple Notes",
+      "purpose": "Used for short-term note-taking, to-do lists, find, read, edit, delete, and open notes in the Apple Notes app.",
+      "tool_module": "apps.notes_tools"
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian",
+      "purpose": "Used for story-writing, journaling, and managing Markdown stories and documents in the local Obsidian vault, including exact-passage edits, search, folder operations, and opening documents for review.",
+      "tool_module": "apps.text_editor_tools"
+    },
+    {
+      "id": "calendar",
+      "name": "Calendar",
+      "purpose": "Used for scheduling events, tracking reminders, logging daily progress, and summarizing work across a time period.",
+      "tool_module": "apps.calendar_tools"
+    }
+  ]
+}
