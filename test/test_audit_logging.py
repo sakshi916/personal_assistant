@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,6 +59,23 @@ class AuditLoggingTests(unittest.TestCase):
         self.assertEqual(event["call_id"], "call-123")
         self.assertEqual(event["turn_id"], turn_id)
         self.assertEqual(event["status"], "success")
+
+    def test_log_timestamp_uses_machine_local_timezone(self) -> None:
+        audit_log.log_tool_call(
+            app_id="memory",
+            tool_name="local_time_test",
+            arguments={},
+            result="ok",
+            status="success",
+            duration_ms=0,
+        )
+
+        timestamp = datetime.fromisoformat(
+            _read_events(self.root / "logs/memory.jsonl")[0]["timestamp"]
+        )
+
+        self.assertIsNotNone(timestamp.utcoffset())
+        self.assertEqual(timestamp.utcoffset(), timestamp.astimezone().utcoffset())
 
     def test_memory_dispatch_logs_success_and_failure_results(self) -> None:
         with patch.object(memory_tools, "MEMORY_ROOT", self.root / "memory"):

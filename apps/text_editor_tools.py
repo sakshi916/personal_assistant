@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
-VAULT_ROOT = Path(__file__).resolve().parent / "memory" / "obsidian" / "personal"
+VAULT_ROOT = Path(__file__).resolve().parent.parent / "memory" / "obsidian" / "personal"
 MAX_READ_CHARACTERS = 40_000
 MAX_SEARCH_RESULTS = 20
 _SEARCH_TERM = re.compile(r"[\w'-]+", re.UNICODE)

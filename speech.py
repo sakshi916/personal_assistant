@@ -4,6 +4,7 @@ from threading import Event
 import speech_recognition as sr
 from pynput import keyboard
 
+import app_tools
 from assistant import build_system_prompt, run_assistant
 
 r = sr.Recognizer()
@@ -65,7 +66,9 @@ def _speak_answer(answer: str) -> None:
 
 
 def listen_and_recognize():
+    _speak_answer("hi, how can I help you?÷")
     history = [{"role": "system", "content": build_system_prompt()}]
+    tool_context = app_tools.ToolContext()
 
     while True:
         try:
@@ -81,10 +84,11 @@ def listen_and_recognize():
                 
                 if "exit" in text:
                     print("Exiting program...")
+                    _speak_answer("Bye")
                     break
 
                 history.append({"role": "user", "content": text})
-                answer = run_assistant(history)
+                answer = run_assistant(history, tool_context=tool_context)
                 print(f"assistant> {answer}\n")                
             
             _speak_answer(answer)

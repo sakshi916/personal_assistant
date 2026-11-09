@@ -64,9 +64,10 @@ _app_selection_tool = {
     "function": {
         "name": "select_app",
         "description": (
-            "Choose exactly one application for the user's current request from "
-            "the app catalog. If the task clearly requires multiple apps, ask "
-            "the user to split it into separate requests."
+            "Choose the application for the user's current task from the app "
+            "catalog. Keep it selected for follow-up turns until the user asks "
+            "to switch apps. If a task clearly requires multiple apps, ask the "
+            "user to split it into separate requests."
         ),
         "parameters": {
             "type": "object",
@@ -111,7 +112,8 @@ def _select_app(args: dict[str, Any], context: ToolContext) -> str:
     application = next(app for app in APP_CATALOG if app["id"] == app_id)
     return (
         f"Selected {application['name']}: {application['purpose']} "
-        "Use only this application's tools for the current request."
+        "Use this application's tools for follow-up turns until the user "
+        "selects another app."
     )
 
 
@@ -126,7 +128,7 @@ def _build_tool_registry() -> dict[str, ToolRegistration]:
         ToolRegistration(
             definition=_app_selection_tool,
             handler=_select_app,
-            is_available=lambda context: context.selected_app_id is None,
+            is_available=lambda _context: True,
             app_id="app_router",
         )
     ]

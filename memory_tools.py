@@ -8,11 +8,11 @@ from __future__ import annotations
 import json
 import re
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 import audit_log
+import server_time
 
 MEMORY_ROOT = Path(__file__).resolve().parent / "memory"
 INDEX_NAME = "memory_index.json"
@@ -106,7 +106,7 @@ def _save_index_entry(
     relative_path: str, category: str, topic: str, description: str
 ) -> None:
     index = _load_index()
-    updated_at = datetime.now(timezone.utc).isoformat()
+    updated_at = server_time.local_now().isoformat()
     new_entry = {
         "path": relative_path,
         "category": category,
@@ -254,7 +254,7 @@ def append_recent_history(args: dict[str, Any]) -> str:
         {
             "role": role,
             "content": content,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": server_time.local_now().isoformat(),
         }
     )
     messages = messages[-MAX_HISTORY_MESSAGES:]

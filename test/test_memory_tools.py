@@ -1,10 +1,13 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
 import memory_tools
+import server_time
 
 
 class MemoryToolsTests(unittest.TestCase):
@@ -47,6 +50,29 @@ class MemoryToolsTests(unittest.TestCase):
         self.assertEqual(len(history), 20)
         self.assertEqual(history[0]["content"], "message 5")
         self.assertEqual(history[-1]["content"], "message 24")
+
+    def test_memory_timestamps_use_server_local_timezone(self) -> None:
+        local_now = datetime(2026, 11, 9, 9, 15, tzinfo=ZoneInfo("Asia/Kolkata"))
+        with patch.object(server_time, "local_now", return_value=local_now):
+            memory_tools.update_memory(
+                {
+                    "category": "tech",
+                    "topic": "progress",
+                    "content": "Working locally.",
+                    "description": "Progress update.",
+                }
+            )
+            memory_tools.append_recent_history(
+                {"category": "tech", "role": "user", "content": "Remember this."}
+            )
+
+        index = json.loads((self.memory_root / memory_tools.INDEX_NAME).read_text())
+        history = json.loads((self.memory_root / "tech/recentHistory.json").read_text())
+        index_timestamp = datetime.fromisoformat(index["entries"][0]["updated_at"])
+        history_timestamp = datetime.fromisoformat(history[0]["timestamp"])
+
+        self.assertEqual(index_timestamp, local_now)
+        self.assertEqual(history_timestamp, local_now)
 
     def test_person_summary_is_created_and_indexed(self) -> None:
         result = memory_tools.update_person_summary({"content": "Prefers concise answers."})

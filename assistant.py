@@ -11,12 +11,14 @@ import ollama
 import app_tools
 import audit_log
 import memory_tools
+import server_time
 
-MODEL = "gemma4:latest"
-# MODEL = "qwen3.8:27b-mlx"
+#MODEL = "gemma4:latest"
+MODEL = "qwen3.8:27b-mlx"
 
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "SystemPrompt.txt"
 BASE_SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+_DATETIME_CONTEXT_PREFIX = "Current server-local date and time:"
 
 
 def build_system_prompt() -> str:
@@ -66,17 +68,25 @@ def _available_tool_providers(context: app_tools.ToolContext) -> list[_ToolProvi
     ]
 
 
-def run_assistant(history: list[dict[str, Any]], max_tool_rounds: int = 10) -> str:
+def run_assistant(
+    history: list[dict[str, Any]],
+    max_tool_rounds: int = 10,
+    *,
+    tool_context: app_tools.ToolContext | None = None,
+) -> str:
     """Run one assistant turn with in-process correlation IDs for tool calls."""
     with audit_log.assistant_turn():
-        return _run_assistant_turn(history, max_tool_rounds)
+        return _run_assistant_turn(history, max_tool_rounds, tool_context)
 
 
 def _run_assistant_turn(
-    history: list[dict[str, Any]], max_tool_rounds: int
+    history: list[dict[str, Any]],
+    max_tool_rounds: int,
+    tool_context: app_tools.ToolContext | None = None,
 ) -> str:
     """Run a chat turn, exposing and dispatching context-available tools."""
-    context = app_tools.ToolContext()
+    _refresh_server_datetime(history)
+    context = tool_context if tool_context is not None else app_tools.ToolContext()
     for _ in range(max_tool_rounds):
         providers = _available_tool_providers(context)
         tools: list[dict[str, Any]] = []
@@ -88,7 +98,7 @@ def _run_assistant_turn(
                     raise ValueError(f"duplicate tool name registered: {name!r}")
                 tools.append(definition)
                 dispatchers[name] = provider.dispatch
-
+        #print(f"Available tools: {[tool['function']['name'] for tool in tools]}")
         response = ollama.chat(
             model=MODEL,
             messages=history,
@@ -140,8 +150,35 @@ def _run_assistant_turn(
     return history[-1]["content"]
 
 
+def _refresh_server_datetime(history: list[dict[str, Any]]) -> None:
+    """Add or refresh the current server-local time for this assistant turn."""
+    current_time = server_time.local_now()
+    context = {
+        "role": "system",
+        "content": (
+            f"{_DATETIME_CONTEXT_PREFIX} {current_time.isoformat()} "
+            f"({current_time.tzname() or 'local timezone'}). "
+            "Interpret relative dates and times in this timezone; do not assume UTC."
+        ),
+    }
+
+    for index, message in enumerate(history):
+        content = message.get("content")
+        if (
+            message.get("role") == "system"
+            and isinstance(content, str)
+            and content.startswith(_DATETIME_CONTEXT_PREFIX)
+        ):
+            history[index] = context
+            return
+
+    insertion_index = 1 if history and history[0].get("role") == "system" else 0
+    history.insert(insertion_index, context)
+
+
 def notes() -> None:
     history = [{"role": "system", "content": build_system_prompt()}]
+    tool_context = app_tools.ToolContext()
 
     print(f"Personal assistant (model: {MODEL}). Type 'exit' to quit.\n")
 
@@ -159,5 +196,5 @@ def notes() -> None:
             break
 
         history.append({"role": "user", "content": user_input})
-        answer = run_assistant(history)
+        answer = run_assistant(history, tool_context=tool_context)
         print(f"assistant> {answer}\n")

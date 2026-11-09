@@ -4,7 +4,7 @@
     {
       "id": "apple_notes",
       "name": "Apple Notes",
-      "purpose": "Used for short-term note-taking, to-do lists, find, read, edit, delete, and open notes in the Apple Notes app.",
+      "purpose": "Used for short-term note-taking, to-do lists, find, read, edit, delete,list all notes, and open notes in the Apple Notes app.",
       "tool_module": "apps.notes_tools"
     },
     {
@@ -16,8 +16,14 @@
     {
       "id": "calendar",
       "name": "Calendar",
-      "purpose": "Used for scheduling events, tracking reminders, logging daily progress, and summarizing work across a time period.",
+      "purpose": "Used to manage events and native alerts in the macOS default Calendar, log daily progress locally, and summarize work across a date range.",
       "tool_module": "apps.calendar_tools"
+    },
+    {
+      "id": "browser",
+      "name": "Browser",
+      "purpose": "Search the live web and YouTube, compare and read public pages, check URL reputation, and open selected links in Safari without downloading files.",
+      "tool_module": "apps.browser_tools"
     }
   ]
 }

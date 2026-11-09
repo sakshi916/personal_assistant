@@ -8,10 +8,11 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
+
+import server_time
 
 LOG_ROOT = Path(__file__).resolve().parent / "logs"
 MAX_LOG_BYTES = 10 * 1024 * 1024
@@ -176,7 +177,7 @@ def log_tool_call(
         arguments_truncated = True
 
     record: dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": server_time.local_now().isoformat(),
         "event_id": uuid4().hex,
         "turn_id": _turn_id.get(),
         "call_id": _call_id.get() or uuid4().hex,

@@ -2,7 +2,9 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
 try:
@@ -18,6 +20,7 @@ except ModuleNotFoundError as error:
 import app_tools
 import audit_log
 import memory_tools
+import server_time
 
 
 def _memory_tool_names() -> set[str]:
@@ -58,6 +61,43 @@ class AppRoutingTests(unittest.TestCase):
         self.assertIn("## Personal summary", prompt)
         self.assertIn("Prefers concise explanations.", prompt)
 
+    def test_each_turn_receives_fresh_server_local_datetime(self) -> None:
+        local_times = [
+            datetime(2026, 11, 9, 9, 15, tzinfo=ZoneInfo("Asia/Kolkata")),
+            datetime(2026, 11, 9, 9, 16, tzinfo=ZoneInfo("Asia/Kolkata")),
+        ]
+        sent_messages: list[list[dict[str, str]]] = []
+
+        def fake_chat(**kwargs: object) -> dict[str, object]:
+            sent_messages.append(
+                [dict(message) for message in kwargs["messages"]]
+            )
+            return {"message": {"content": "Done."}}
+
+        history = [{"role": "system", "content": "Session snapshot"}]
+        with patch.object(server_time, "local_now", side_effect=local_times):
+            with patch.object(assistant.ollama, "chat", side_effect=fake_chat):
+                assistant.run_assistant(history)
+                history.append({"role": "user", "content": "What time is it?"})
+                assistant.run_assistant(history)
+
+        time_contexts = [
+            [
+                message["content"]
+                for message in messages
+                if message.get("role") == "system"
+                and message.get("content", "").startswith(
+                    "Current server-local date and time:"
+                )
+            ]
+            for messages in sent_messages
+        ]
+        self.assertEqual(len(time_contexts[0]), 1)
+        self.assertEqual(len(time_contexts[1]), 1)
+        self.assertIn(local_times[0].isoformat(), time_contexts[0][0])
+        self.assertIn(local_times[1].isoformat(), time_contexts[1][0])
+        self.assertIn("do not assume UTC", time_contexts[1][0])
+
     def test_missing_and_empty_summary_have_explicit_prompt_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             with patch.object(
@@ -75,9 +115,13 @@ class AppRoutingTests(unittest.TestCase):
 
     def test_typed_session_uses_one_summary_snapshot(self) -> None:
         prompt_seen_by_turns: list[str] = []
+        tool_contexts: list[object] = []
 
-        def fake_run_assistant(history: list[dict[str, str]]) -> str:
+        def fake_run_assistant(
+            history: list[dict[str, str]], **kwargs: object
+        ) -> str:
             prompt_seen_by_turns.append(history[0]["content"])
+            tool_contexts.append(kwargs["tool_context"])
             return "Done."
 
         with patch.object(
@@ -91,6 +135,8 @@ class AppRoutingTests(unittest.TestCase):
 
         build_prompt.assert_called_once_with()
         self.assertEqual(prompt_seen_by_turns, ["session snapshot", "session snapshot"])
+        self.assertEqual(len(tool_contexts), 2)
+        self.assertIs(tool_contexts[0], tool_contexts[1])
 
     def test_obsidian_turn_only_receives_selection_then_obsidian_tools(self) -> None:
         responses = [
@@ -140,7 +186,9 @@ class AppRoutingTests(unittest.TestCase):
                         "search_obsidian_",
                     )
                 )
-                for name in set(sent_tool_names[1]) - _memory_tool_names()
+                for name in (
+                    set(sent_tool_names[1]) - _memory_tool_names() - {"select_app"}
+                )
             )
         )
         self.assertTrue(_memory_tool_names().issubset(set(sent_tool_names[1])))
@@ -178,7 +226,7 @@ class AppRoutingTests(unittest.TestCase):
             {
                 tool["function"]["name"]
                 for tool in app_tools.APP_TOOLSETS["apple_notes"].TOOLS
-            },
+            } | {"select_app"},
         )
         self.assertTrue(_memory_tool_names().issubset(set(sent_tool_names[1])))
         self.assertEqual(sent_tool_names[1], sent_tool_names[2])
@@ -186,6 +234,80 @@ class AppRoutingTests(unittest.TestCase):
             any(name.startswith("create_obsidian_") for name in sent_tool_names[1])
         )
         dispatch.assert_called_once()
+
+    def test_selected_app_tools_persist_across_turns_and_can_switch(self) -> None:
+        responses = [
+            _tool_call("select_app", {"app_id": "apple_notes"}),
+            {"message": {"role": "assistant", "content": "Notes selected."}},
+            _tool_call("list_notes", {}),
+            {"message": {"role": "assistant", "content": "Hobbies"}},
+            _tool_call("select_app", {"app_id": "obsidian"}),
+            {"message": {"role": "assistant", "content": "Obsidian selected."}},
+            _tool_call(
+                "create_obsidian_document",
+                {"path": "Stories/scene.md", "content": "The rain stopped."},
+            ),
+            {"message": {"role": "assistant", "content": "Created the scene."}},
+        ]
+        sent_tool_names: list[set[str]] = []
+
+        def fake_chat(**kwargs: object) -> dict[str, object]:
+            sent_tool_names.append(
+                {tool["function"]["name"] for tool in kwargs["tools"]}
+            )
+            return responses.pop(0)
+
+        context = app_tools.ToolContext()
+        with patch.object(assistant.ollama, "chat", side_effect=fake_chat):
+            with patch.object(
+                app_tools.APP_TOOLSETS["apple_notes"],
+                "dispatch",
+                return_value="Hobbies",
+            ) as notes_dispatch:
+                with patch.object(
+                    app_tools.APP_TOOLSETS["obsidian"],
+                    "dispatch",
+                    return_value="created",
+                ) as obsidian_dispatch:
+                    self.assertEqual(
+                        assistant.run_assistant(
+                            [{"role": "user", "content": "Use Apple Notes."}],
+                            tool_context=context,
+                        ),
+                        "Notes selected.",
+                    )
+                    self.assertEqual(
+                        assistant.run_assistant(
+                            [{"role": "user", "content": "List my notes."}],
+                            tool_context=context,
+                        ),
+                        "Hobbies",
+                    )
+                    self.assertEqual(
+                        assistant.run_assistant(
+                            [{"role": "user", "content": "Switch to Obsidian."}],
+                            tool_context=context,
+                        ),
+                        "Obsidian selected.",
+                    )
+                    self.assertEqual(
+                        assistant.run_assistant(
+                            [{"role": "user", "content": "Create a scene."}],
+                            tool_context=context,
+                        ),
+                        "Created the scene.",
+                    )
+
+        self.assertIn("list_notes", sent_tool_names[2])
+        self.assertIn("select_app", sent_tool_names[2])
+        self.assertIn("list_notes", sent_tool_names[3])
+        self.assertIn("select_app", sent_tool_names[4])
+        self.assertIn("create_obsidian_document", sent_tool_names[5])
+        self.assertIn("create_obsidian_document", sent_tool_names[6])
+        self.assertIn("select_app", sent_tool_names[6])
+        self.assertNotIn("list_notes", sent_tool_names[6])
+        notes_dispatch.assert_called_once_with("list_notes", {})
+        obsidian_dispatch.assert_called_once()
 
     def test_app_selection_tool_is_optional(self) -> None:
         with patch.object(
@@ -264,8 +386,7 @@ class AppRoutingTests(unittest.TestCase):
             for definition in app_tools.APP_TOOLSETS["calendar"].TOOLS
         }
         available_names = {tool["function"]["name"] for tool in available}
-        self.assertEqual(available_names, expected)
-        self.assertNotIn("select_app", available_names)
+        self.assertEqual(available_names, expected | {"select_app"})
 
 
 if __name__ == "__main__":
