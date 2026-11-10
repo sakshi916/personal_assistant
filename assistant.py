@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any, Callable
 
 import ollama
@@ -14,11 +15,14 @@ import memory_tools
 import server_time
 
 #MODEL = "gemma4:latest"
-MODEL = "qwen3.8:27b-mlx"
-
+#MODEL = "qwen3.8:27b-mlx"
+#MODEL = "gemma4:31b-mlx"
+MODEL = "gemma4:26b-mlx"
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "SystemPrompt.txt"
 BASE_SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 _DATETIME_CONTEXT_PREFIX = "Current server-local date and time:"
+MAX_HISTORY_MESSAGES = 30
+_TLDR_PREFIX = "TLDR:"
 
 
 def build_system_prompt() -> str:
@@ -70,7 +74,7 @@ def _available_tool_providers(context: app_tools.ToolContext) -> list[_ToolProvi
 
 def run_assistant(
     history: list[dict[str, Any]],
-    max_tool_rounds: int = 10,
+    max_tool_rounds: int = 15,
     *,
     tool_context: app_tools.ToolContext | None = None,
 ) -> str:
@@ -88,6 +92,7 @@ def _run_assistant_turn(
     _refresh_server_datetime(history)
     context = tool_context if tool_context is not None else app_tools.ToolContext()
     for _ in range(max_tool_rounds):
+        _compact_history(history)
         providers = _available_tool_providers(context)
         tools: list[dict[str, Any]] = []
         dispatchers: dict[str, Callable[[str, Any], str]] = {}
@@ -104,13 +109,23 @@ def _run_assistant_turn(
             messages=history,
             tools=tools,
         )
-        message = response["message"]
-        history.append(message)
 
+        message = response["message"]
         tool_calls = message.get("tool_calls")
         if not tool_calls:
-            return message.get("content") or ""
+            answer = message.get("content") or ""
+            if isinstance(answer, str):
+                tldr = _extract_tldr(answer)
+                if tldr is not None:
+                    message["content"] = tldr
+            history.append(message)
+            # Play a single system beep
+            sys.stdout.write('\a')
+            sys.stdout.flush()
 
+            return answer
+
+        history.append(message)
         for call in tool_calls:
             function = call["function"]
             name = function["name"]
@@ -129,7 +144,8 @@ def _run_assistant_turn(
                     )
                 else:
                     result = dispatcher(name, arguments)
-            print(f"  [{name}] -> {result}")
+            #print(f"  [{name}] -> {result}")
+            print(f"[{name}]")
             history.append(
                 {
                     "role": "tool",
@@ -148,6 +164,23 @@ def _run_assistant_turn(
         }
     )
     return history[-1]["content"]
+
+
+def _compact_history(history: list[dict[str, Any]]) -> None:
+    """Keep system messages and the last 20 non-system messages."""
+    system_messages = [message for message in history if message.get("role") == "system"]
+    conversation = [
+        message for message in history if message.get("role") != "system"
+    ]
+    history[:] = system_messages + conversation[-MAX_HISTORY_MESSAGES:]
+
+
+def _extract_tldr(answer: str) -> str | None:
+    marker_index = answer.rfind(_TLDR_PREFIX)
+    if marker_index < 0:
+        return None
+    tldr = answer[marker_index + len(_TLDR_PREFIX) :].strip()
+    return tldr or None
 
 
 def _refresh_server_datetime(history: list[dict[str, Any]]) -> None:

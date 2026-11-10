@@ -37,7 +37,10 @@ recommendations use metadata, not transcript or spoken-content verification.
 
 Memory tools are available in every assistant turn. At the start of each typed
 or voice session, `memory/personSummary.txt` is included in the system prompt;
-other indexed memories can be retrieved on demand. See
+other indexed memories can be retrieved on demand. Individual files and
+folders can be deleted with explicit confirmation; deletions are confined to
+the memory folder and remove matching memory-index entries. The memory root
+and its reserved root files cannot be deleted. See
 [memory/README.md](memory/README.md) for details.
 
 The assistant interprets relative dates and times using the server's configured

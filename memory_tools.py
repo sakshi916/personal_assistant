@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
@@ -268,6 +269,61 @@ def append_recent_history(args: dict[str, Any]) -> str:
     return f"Appended message to {relative_path} ({len(messages)} messages retained)"
 
 
+def delete_memory(args: dict[str, Any]) -> str:
+    """Delete a confirmed memory file or folder and remove its index entries."""
+    relative_path = _validate_relative_path(args.get("path"), "path")
+    if args.get("confirm") is not True:
+        raise ValueError("confirm must be true to delete memory")
+
+    memory_parts = PurePosixPath(relative_path).parts
+    if not memory_parts:
+        raise ValueError("path must identify a file or folder inside the memory folder")
+
+    root = MEMORY_ROOT.resolve()
+    candidate = root
+    for part in memory_parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise ValueError("symbolic links are not allowed in deletion paths")
+
+    path = _memory_path(relative_path)
+    if len(memory_parts) == 1:
+        for reserved_name in {INDEX_NAME, PERSON_SUMMARY_NAME, "README.md"}:
+            reserved_path = _memory_path(reserved_name)
+            if path == reserved_path or (
+                path.exists()
+                and reserved_path.exists()
+                and path.samefile(reserved_path)
+            ):
+                raise ValueError(
+                    f"cannot delete reserved memory file: {relative_path}"
+                )
+
+    if not path.exists():
+        raise FileNotFoundError(f"memory path not found: {relative_path}")
+    if not path.is_file() and not path.is_dir():
+        raise ValueError("memory path must be a regular file or directory")
+
+    index = _load_index()
+    retained_entries = []
+    for entry in index["entries"]:
+        entry_path = _memory_path(entry["path"])
+        if entry_path != path and path not in entry_path.parents:
+            retained_entries.append(entry)
+    index["entries"] = retained_entries
+
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+    _atomic_write(
+        _memory_path(INDEX_NAME),
+        json.dumps(index, ensure_ascii=False, indent=2) + "\n",
+    )
+    return f"Deleted memory: {relative_path}"
+
+
 def _tool(
     name: str,
     description: str,
@@ -337,6 +393,21 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["category", "role", "content"],
     ),
+    _tool(
+        "delete_memory",
+        "Delete a memory file or an entire folder and its contents only when the user explicitly requests deletion. Requires confirm=true. Paths are relative to the memory folder; never delete the memory root, memory_index.json, personSummary.txt, or README.md.",
+        {
+            "path": {
+                "type": "string",
+                "description": "Memory file or folder path relative to the memory folder.",
+            },
+            "confirm": {
+                "type": "boolean",
+                "description": "Must be true to confirm the requested deletion.",
+            },
+        },
+        ["path", "confirm"],
+    ),
 ]
 
 HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -345,6 +416,7 @@ HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "update_memory": update_memory,
     "update_person_summary": update_person_summary,
     "append_recent_history": append_recent_history,
+    "delete_memory": delete_memory,
 }
 
 def dispatch(

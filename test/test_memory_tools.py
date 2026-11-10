@@ -156,6 +156,150 @@ class MemoryToolsTests(unittest.TestCase):
         self.assertIn("outside the memory folder", result)
         self.assertFalse((outside_directory / "secret.md").exists())
 
+    def test_delete_requires_explicit_confirmation(self) -> None:
+        memory_directory = self.memory_root / "job_prep"
+        memory_directory.mkdir()
+        (memory_directory / "overview.md").write_text("Keep until confirmed.")
+
+        missing_confirmation = memory_tools.dispatch(
+            "delete_memory", {"path": "job_prep"}
+        )
+        false_confirmation = memory_tools.dispatch(
+            "delete_memory", {"path": "job_prep", "confirm": False}
+        )
+
+        self.assertTrue(missing_confirmation.startswith("error:"))
+        self.assertTrue(false_confirmation.startswith("error:"))
+        self.assertTrue(memory_directory.is_dir())
+        self.assertEqual(
+            (memory_directory / "overview.md").read_text(),
+            "Keep until confirmed.",
+        )
+
+    def test_delete_folder_removes_contents_and_matching_index_entries(self) -> None:
+        memory_tools.update_memory(
+            {
+                "category": "job_prep",
+                "topic": "overview",
+                "content": "Interview preparation.",
+                "description": "Job preparation overview.",
+            }
+        )
+        memory_tools.update_memory(
+            {
+                "category": "job_prep",
+                "topic": "weekly/plan",
+                "content": "Practice each week.",
+                "description": "Job preparation plan.",
+            }
+        )
+        memory_tools.append_recent_history(
+            {"category": "job_prep", "role": "user", "content": "Unindexed context."}
+        )
+        memory_tools.update_memory(
+            {
+                "category": "career",
+                "topic": "progress",
+                "content": "Keep this memory.",
+                "description": "Career progress.",
+            }
+        )
+        unindexed_file = self.memory_root / "job_prep" / "unindexed.txt"
+        unindexed_file.write_text("Also delete me.", encoding="utf-8")
+
+        result = memory_tools.dispatch(
+            "delete_memory", {"path": "job_prep", "confirm": True}
+        )
+
+        self.assertEqual(result, "Deleted memory: job_prep")
+        self.assertFalse((self.memory_root / "job_prep").exists())
+        index = json.loads((self.memory_root / memory_tools.INDEX_NAME).read_text())
+        self.assertEqual(
+            [entry["path"] for entry in index["entries"]],
+            ["career/progress.md"],
+        )
+
+    def test_delete_file_removes_its_index_entry(self) -> None:
+        memory_tools.update_memory(
+            {
+                "category": "tech",
+                "topic": "obsolete",
+                "content": "No longer relevant.",
+                "description": "Obsolete technical note.",
+            }
+        )
+
+        result = memory_tools.dispatch(
+            "delete_memory",
+            {"path": "tech/obsolete.md", "confirm": True},
+        )
+
+        self.assertEqual(result, "Deleted memory: tech/obsolete.md")
+        self.assertFalse((self.memory_root / "tech/obsolete.md").exists())
+        index = json.loads((self.memory_root / memory_tools.INDEX_NAME).read_text())
+        self.assertEqual(index["entries"], [])
+
+    def test_delete_protects_reserved_root_files(self) -> None:
+        (self.memory_root / "README.md").write_text("Memory guidance.")
+        memory_tools.update_person_summary({"content": "Personal facts."})
+
+        for path in (
+            memory_tools.INDEX_NAME,
+            memory_tools.PERSON_SUMMARY_NAME,
+            "README.md",
+        ):
+            with self.subTest(path=path):
+                result = memory_tools.dispatch(
+                    "delete_memory", {"path": path, "confirm": True}
+                )
+                self.assertTrue(result.startswith("error:"))
+                self.assertTrue((self.memory_root / path).exists())
+
+    def test_delete_rejects_symlink_escape(self) -> None:
+        outside_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(outside_temp.cleanup)
+        outside_directory = Path(outside_temp.name)
+        outside_file = outside_directory / "keep.txt"
+        outside_file.write_text("Outside memory.", encoding="utf-8")
+        (self.memory_root / "escape").symlink_to(
+            outside_directory, target_is_directory=True
+        )
+
+        result = memory_tools.dispatch(
+            "delete_memory", {"path": "escape", "confirm": True}
+        )
+
+        self.assertTrue(result.startswith("error:"))
+        self.assertIn("symbolic links", result)
+        self.assertTrue(outside_file.exists())
+        self.assertTrue((self.memory_root / "escape").is_symlink())
+
+    def test_delete_rejects_traversal_and_memory_root_paths(self) -> None:
+        for path in ("../outside", "."):
+            with self.subTest(path=path):
+                result = memory_tools.dispatch(
+                    "delete_memory", {"path": path, "confirm": True}
+                )
+                self.assertTrue(result.startswith("error:"))
+        self.assertTrue(self.memory_root.is_dir())
+
+    def test_deleting_folder_does_not_follow_nested_symlinks(self) -> None:
+        outside_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(outside_temp.cleanup)
+        outside_file = Path(outside_temp.name) / "keep.txt"
+        outside_file.write_text("Outside memory.", encoding="utf-8")
+        memory_directory = self.memory_root / "job_prep"
+        memory_directory.mkdir()
+        (memory_directory / "outside_link").symlink_to(outside_file)
+
+        result = memory_tools.dispatch(
+            "delete_memory", {"path": "job_prep", "confirm": True}
+        )
+
+        self.assertEqual(result, "Deleted memory: job_prep")
+        self.assertFalse(memory_directory.exists())
+        self.assertTrue(outside_file.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

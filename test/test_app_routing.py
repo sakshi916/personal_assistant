@@ -98,6 +98,108 @@ class AppRoutingTests(unittest.TestCase):
         self.assertIn(local_times[1].isoformat(), time_contexts[1][0])
         self.assertIn("do not assume UTC", time_contexts[1][0])
 
+    def test_history_keeps_system_messages_and_recent_turns(self) -> None:
+        sent_messages: list[list[dict[str, object]]] = []
+
+        def fake_chat(**kwargs: object) -> dict[str, object]:
+            sent_messages.append(
+                [dict(message) for message in kwargs["messages"]]
+            )
+            return {
+                "message": {
+                    "role": "assistant",
+                    "content": "Detailed answer with all details intact.",
+                }
+            }
+
+        history = [{"role": "system", "content": "Session instructions"}]
+        for index in range(10):
+            history.extend(
+                [
+                    {"role": "user", "content": f"request {index}"},
+                    {"role": "assistant", "content": f"answer {index}"},
+                ]
+            )
+        history.append({"role": "user", "content": "latest request"})
+
+        with patch.object(assistant.ollama, "chat", side_effect=fake_chat):
+            answer = assistant.run_assistant(history)
+
+        sent = sent_messages[0]
+        sent_conversation = [message for message in sent if message["role"] != "system"]
+        self.assertLessEqual(len(sent_conversation), assistant.MAX_HISTORY_MESSAGES)
+        self.assertTrue(
+            any(message["content"] == "Session instructions" for message in sent)
+        )
+        self.assertTrue(
+            any(
+                message["role"] == "system"
+                and str(message["content"]).startswith(
+                    "Current server-local date and time:"
+                )
+                for message in sent
+            )
+        )
+        self.assertNotIn(
+            "request 0",
+            [message["content"] for message in sent_conversation],
+        )
+        self.assertEqual(sent_conversation[-1]["content"], "latest request")
+        self.assertEqual(answer, "Detailed answer with all details intact.")
+        self.assertEqual(
+            history[-1]["content"], "Detailed answer with all details intact."
+        )
+        self.assertEqual(len(history), 23)
+
+    def test_history_compaction_keeps_last_twenty_non_system_messages(self) -> None:
+        history = [{"role": "system", "content": "Session instructions"}]
+        for index in range(9):
+            history.extend(
+                [
+                    {"role": "user", "content": f"request {index}"},
+                    {"role": "assistant", "content": f"answer {index}"},
+                ]
+            )
+        history.extend(
+            [
+                {"role": "user", "content": "create a note"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"function": {"name": "create_note", "arguments": {}}}
+                    ],
+                },
+                {"role": "tool", "name": "create_note", "content": "created"},
+                {"role": "assistant", "content": "The note was created."},
+            ]
+        )
+        conversation = [message for message in history if message["role"] != "system"]
+        expected_tail = conversation[-assistant.MAX_HISTORY_MESSAGES :]
+
+        assistant._compact_history(history)
+
+        conversation = [message for message in history if message["role"] != "system"]
+        self.assertEqual(conversation, expected_tail)
+        self.assertEqual(len(conversation), assistant.MAX_HISTORY_MESSAGES)
+        self.assertEqual(conversation[0]["content"], "request 1")
+
+    def test_assistant_answer_is_replaced_by_last_tldr_in_history(self) -> None:
+        answer = (
+            "This is the complete answer.\n"
+            "TLDR: an earlier summary\n"
+            "TLDR: the final concise summary"
+        )
+        history = [{"role": "user", "content": "Help."}]
+        with patch.object(
+            assistant.ollama,
+            "chat",
+            return_value={"message": {"role": "assistant", "content": answer}},
+        ):
+            result = assistant.run_assistant(history)
+
+        self.assertEqual(result, answer)
+        self.assertEqual(history[-1]["content"], "the final concise summary")
+
     def test_missing_and_empty_summary_have_explicit_prompt_context(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             with patch.object(
