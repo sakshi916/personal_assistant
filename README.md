@@ -1,5 +1,48 @@
 AI Powered Personal assistant for Sakshi in MacOS.
 
+## macOS app
+
+The native SwiftUI app provides a Finder/Applications-launchable chat window
+and a voice popup in the menu bar. Assistant replies are rendered as formatted
+Markdown, including paragraphs, lists, tables, and fenced code blocks, rather
+than raw Markdown markers. Remote Markdown images are not loaded. Click the
+menu bar waveform to open voice mode, then click **Start speaking** and click
+**Finish speaking** when done. Voice transcription uses WhisperKit on-device.
+The first voice turn downloads the multilingual base model into
+`~/Library/Application Support/PersonalAssistant/WhisperKit`; an internet
+connection is needed for this one-time download. Afterward, transcription runs
+locally and requires microphone permission only—Siri, Dictation, and macOS
+Speech Recognition are not used.
+
+### Build and install
+
+For a one-time local build, run these commands from the repository checkout:
+
+```sh
+uv sync --group packaging
+./macos/build_app.sh
+open "dist/Personal Assistant.dmg"
+```
+
+In the disk image, drag **Personal Assistant.app** onto **Applications**.
+After installation, launch it from Applications, Spotlight, the Dock, or
+Launchpad; no terminal or repository checkout is needed for normal use. On
+startup it opens the installed Ollama app. Startup does not query Ollama's API,
+inspect available models, or download a model. When you send a chat message,
+the existing assistant backend uses Ollama's local API to generate the reply;
+install/configure Ollama and its model separately before chatting.
+
+The app bundles its Python assistant backend and seeds personal memory into
+`~/Library/Application Support/PersonalAssistant` on first run. Ongoing memory
+and Obsidian-vault changes remain there across app updates. Backend logs are
+stored in `~/Library/Logs/PersonalAssistant`. The helper communicates with the app over
+a permission-restricted Unix socket rather than opening a local TCP listener,
+so helper IPC does not require local-network permission. Chat turns still use
+Ollama's local API to generate responses. The helper stops when the app quits.
+
+The existing terminal workflow remains available and unchanged with
+`uv run python main.py`.
+
 Current capabilities:
 1. Apple Notes manager - CRUD
 2. Obsidian Markdown vault manager - create, read, exact-passage edit, search,

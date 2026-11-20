@@ -15,9 +15,9 @@ import memory_tools
 import server_time
 
 #MODEL = "gemma4:latest"
-#MODEL = "qwen3.8:27b-mlx"
+MODEL = "qwen3.8:27b-mlx"
 #MODEL = "gemma4:31b-mlx"
-MODEL = "gemma4:26b-mlx"
+#MODEL = "gemma4:26b-mlx"
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "SystemPrompt.txt"
 BASE_SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 _DATETIME_CONTEXT_PREFIX = "Current server-local date and time:"
